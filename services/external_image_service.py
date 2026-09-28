@@ -97,6 +97,19 @@ def _post_json(path: str, payload: dict[str, Any], timeout: int) -> dict[str, An
     return data
 
 
+def _detect_image_type(raw: bytes) -> tuple[str, str]:
+    """根据魔数判断图片格式，返回 (扩展名, MIME)。"""
+    if raw[:8] == b"\x89PNG\r\n\x1a\n":
+        return "png", "image/png"
+    if raw[:3] == b"\xff\xd8\xff":
+        return "jpg", "image/jpeg"
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "webp", "image/webp"
+    if raw[:6] in (b"GIF87a", b"GIF89a"):
+        return "gif", "image/gif"
+    return "png", "image/png"
+
+
 def _download_image(url: str, timeout: int) -> bytes:
     requests = _get_requests()
     try:
@@ -202,41 +215,55 @@ def _generate_edit(
         images: list[str],
         timeout: int,
 ) -> list[dict[str, Any]]:
-    """图生图：外部接口要求 multipart/form-data 上传图片。"""
+    """图生图：外部接口要求 multipart/form-data 上传图片。
+
+    注意：curl_cffi 不支持 requests 风格的 files=/data=，
+    必须用 CurlMime + multipart= 构造表单。
+    """
     settings = config.get_external_image_settings()
     base_url = str(settings.get("base_url") or "").rstrip("/")
     requests = _get_requests()
+    from curl_cffi import CurlMime
 
-    files = []
-    for index, encoded in enumerate(images, start=1):
-        raw = base64.b64decode(encoded)
-        files.append(("image", (f"image_{index}.png", raw, "image/png")))
-
-    form: dict[str, Any] = {
-        "model": upstream_model,
-        "prompt": prompt,
-        "n": str(max(1, int(n or 1))),
-    }
-    if size:
-        form["size"] = size
-    if quality:
-        form["quality"] = quality
-
-    logger.info({
-        "event": "external_image_edit_start",
-        "model": upstream_model,
-        "images": len(files),
-    })
+    mime = CurlMime()
     try:
-        response = requests.post(
-            f"{base_url}/v1/images/edits",
-            headers={"Authorization": f"Bearer {settings.get('api_key', '')}"},
-            data=form,
-            files=files,
-            timeout=timeout,
-        )
-    except Exception as exc:  # noqa: BLE001
-        raise ExternalImageError(f"外部图片服务图生图请求失败: {exc}") from exc
+        mime.addpart("model", data=upstream_model.encode("utf-8"))
+        mime.addpart("prompt", data=prompt.encode("utf-8"))
+        mime.addpart("n", data=str(max(1, int(n or 1))).encode("utf-8"))
+        mime.addpart("response_format", data=b"url")
+        if size:
+            mime.addpart("size", data=str(size).encode("utf-8"))
+        if quality:
+            mime.addpart("quality", data=str(quality).encode("utf-8"))
+        for index, encoded in enumerate(images, start=1):
+            raw = base64.b64decode(encoded)
+            ext, content_type = _detect_image_type(raw)
+            mime.addpart(
+                "image",
+                filename=f"image_{index}.{ext}",
+                content_type=content_type,
+                data=raw,
+            )
+
+        logger.info({
+            "event": "external_image_edit_start",
+            "model": upstream_model,
+            "images": len(images),
+        })
+        try:
+            response = requests.post(
+                f"{base_url}/v1/images/edits",
+                headers={"Authorization": f"Bearer {settings.get('api_key', '')}"},
+                multipart=mime,
+                timeout=timeout,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise ExternalImageError(f"外部图片服务图生图请求失败: {exc}") from exc
+    finally:
+        try:
+            mime.close()
+        except Exception:  # noqa: BLE001
+            pass
     if response.status_code != 200:
         detail = ""
         try:

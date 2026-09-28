@@ -66,6 +66,27 @@ class ExternalImageUrlConversionTests(unittest.TestCase):
             external_image_service._to_b64_items({"data": []}, 180)
 
 
+class ImageTypeDetectionTests(unittest.TestCase):
+    def test_detect_png(self):
+        self.assertEqual(
+            external_image_service._detect_image_type(b"\x89PNG\r\n\x1a\n" + b"x"),
+            ("png", "image/png"),
+        )
+
+    def test_detect_jpeg(self):
+        self.assertEqual(
+            external_image_service._detect_image_type(b"\xff\xd8\xff" + b"x"),
+            ("jpg", "image/jpeg"),
+        )
+
+    def test_detect_webp(self):
+        raw = b"RIFF" + b"\x00\x00\x00\x00" + b"WEBP" + b"x"
+        self.assertEqual(external_image_service._detect_image_type(raw), ("webp", "image/webp"))
+
+    def test_detect_unknown_falls_back_to_png(self):
+        self.assertEqual(external_image_service._detect_image_type(b"zzzz"), ("png", "image/png"))
+
+
 class ExternalImageRequestTests(unittest.TestCase):
     def test_generate_builds_url_format_payload(self):
         captured = {}
