@@ -17,6 +17,9 @@ docker-compose-local.yml
 
 .claude/settings.local.json
 
+# macOS
+.DS_Store
+
 # Environment variables
 .env
 .env.local
