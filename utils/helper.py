@@ -123,7 +123,14 @@ def split_image_model(model: object) -> tuple[str | None, str | None]:
 
 def is_supported_image_model(model: object) -> bool:
     _, base_model = split_image_model(model)
-    return base_model is not None
+    if base_model is not None:
+        return True
+    # 外部图片服务映射的模型名也算受支持（懒加载避免循环导入）
+    try:
+        from services.external_image_service import is_external_model
+    except Exception:  # noqa: BLE001
+        return False
+    return is_external_model(model)
 
 
 def is_codex_image_model(model: object) -> bool:

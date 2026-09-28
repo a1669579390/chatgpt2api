@@ -9,6 +9,7 @@ import { useAuthGuard } from "@/lib/use-auth-guard";
 import { BackupSettingsCard } from "./components/backup-settings-card";
 import { ApiDocsCard } from "./components/api-docs-card";
 import { ConfigCard } from "./components/config-card";
+import { ExternalImageCard } from "./components/external-image-card";
 import { CPAPoolDialog } from "./components/cpa-pool-dialog";
 import { CPAPoolsCard } from "./components/cpa-pools-card";
 import { ImportBrowserDialog } from "./components/import-browser-dialog";
@@ -25,6 +26,7 @@ const settingsTabs = [
   { value: "keys", title: "用户密钥" },
   { value: "api-docs", title: "接口接入" },
   { value: "canvas", title: "画布入口" },
+  { value: "external-image", title: "外部图片" },
   { value: "proxy", title: "FlareSolverr" },
   { value: "cpa", title: "CPA" },
   { value: "sub2api", title: "Sub2API" },
@@ -103,6 +105,9 @@ function SettingsPageContent() {
         </TabsContent>
         <TabsContent value="canvas">
           <ThirdPartyAppsCard />
+        </TabsContent>
+        <TabsContent value="external-image">
+          <ExternalImageCard />
         </TabsContent>
         <TabsContent value="api-docs">
           <ApiDocsCard />

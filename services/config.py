@@ -82,6 +82,16 @@ DEFAULT_THIRD_PARTY_APPS = {
     },
 }
 
+# 外部图片服务（第三方 OpenAI 兼容生图接口）
+# 开启后，模型名出现在 external_models 中的请求会转发到该服务，不再走本机账号池。
+DEFAULT_EXTERNAL_IMAGE = {
+    "enabled": False,
+    "base_url": "",
+    "api_key": "",
+    "timeout_sec": 180,
+    "external_models": {},
+}
+
 
 def _normalize_bool(value: object, default: bool = False) -> bool:
     if isinstance(value, str):
@@ -285,6 +295,39 @@ def _normalize_third_party_apps_settings(value: object) -> dict[str, object]:
             "url": str(canvas_source.get("url") or DEFAULT_THIRD_PARTY_APPS["infinite_canvas"]["url"]).strip(),
         },
     }
+
+
+def _normalize_external_image_settings(value: object) -> dict[str, object]:
+    """规范化外部图片服务配置。
+
+    external_models: {"对外模型名": "上游模型名"}，例如
+        {"gpt-image-2.5": "gpt-image-2.5"}
+    """
+    source = value if isinstance(value, dict) else {}
+    raw_models = source.get("external_models")
+    external_models: dict[str, str] = {}
+    if isinstance(raw_models, dict):
+        for alias, upstream in raw_models.items():
+            alias_name = str(alias or "").strip()
+            upstream_name = str(upstream or "").strip()
+            if alias_name and upstream_name:
+                external_models[alias_name] = upstream_name
+    return {
+        "enabled": _normalize_bool(source.get("enabled"), False),
+        "base_url": str(source.get("base_url") or "").strip().rstrip("/"),
+        "api_key": str(source.get("api_key") or "").strip(),
+        "timeout_sec": _normalize_positive_int(source.get("timeout_sec"), 180, minimum=10),
+        "external_models": external_models,
+    }
+
+
+def _validate_external_image_settings(settings: dict[str, object]) -> None:
+    if not _normalize_bool(settings.get("enabled"), False):
+        return
+    if not str(settings.get("base_url") or "").strip():
+        raise ValueError("启用外部图片服务后必须填写 Base URL")
+    if not str(settings.get("api_key") or "").strip():
+        raise ValueError("启用外部图片服务后必须填写 API Key")
 
 
 def _validate_image_storage_settings(settings: dict[str, object]) -> None:
@@ -585,6 +628,7 @@ class ConfigStore:
         data["chat_completion_cache"] = self.get_chat_completion_cache_settings()
         data["proxy_runtime"] = self.get_public_proxy_runtime_settings()
         data["third_party_apps"] = self.get_third_party_apps_settings()
+        data["external_image"] = self.get_public_external_image_settings()
         data.pop("auth-key", None)
         return data
 
@@ -609,6 +653,17 @@ class ConfigStore:
     def get_third_party_apps_settings(self) -> dict[str, object]:
         return _normalize_third_party_apps_settings(self.data.get("third_party_apps"))
 
+    def get_external_image_settings(self) -> dict[str, object]:
+        return _normalize_external_image_settings(self.data.get("external_image"))
+
+    def get_public_external_image_settings(self) -> dict[str, object]:
+        """对外返回的配置：不回传 api_key 明文，只标记是否已设置。"""
+        settings = copy.deepcopy(self.get_external_image_settings())
+        api_key = str(settings.get("api_key") or "").strip()
+        settings["api_key"] = ""
+        settings["has_api_key"] = bool(api_key)
+        return settings
+
     def update(self, data: dict[str, object]) -> dict[str, object]:
         next_data = dict(self.data)
         next_data.update(dict(data or {}))
@@ -623,6 +678,13 @@ class ConfigStore:
             )
         if "third_party_apps" in next_data:
             next_data["third_party_apps"] = _normalize_third_party_apps_settings(next_data.get("third_party_apps"))
+        if "external_image" in next_data:
+            incoming_external = next_data.get("external_image")
+            if isinstance(incoming_external, dict) and not str(incoming_external.get("api_key") or "").strip():
+                incoming_external = dict(incoming_external)
+                incoming_external["api_key"] = self.get_external_image_settings().get("api_key", "")
+            next_data["external_image"] = _normalize_external_image_settings(incoming_external)
+            _validate_external_image_settings(next_data["external_image"])
         if "proxy_runtime" in next_data:
             incoming_runtime = next_data.get("proxy_runtime")
             if isinstance(incoming_runtime, dict):

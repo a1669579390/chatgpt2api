@@ -13,6 +13,12 @@ import tiktoken
 
 from services.account_service import account_service
 from services.config import config
+from services.external_image_service import (
+    ExternalImageError,
+    generate as external_generate,
+    is_external_model,
+    list_external_models,
+)
 from services.image_storage_service import image_storage_service
 from services.openai_backend_api import ImageContentPolicyError, ImagePollTimeoutError, OpenAIBackendAPI
 from utils.helper import (
@@ -1526,10 +1532,64 @@ def _generate_single_image(
                 backend.close()
 
 
+def stream_external_image_outputs(request: ConversationRequest) -> Iterator[ImageOutput]:
+    """把请求转发给外部图片服务，并把结果包装成标准 ImageOutput。
+
+    与内部链路共用 format_image_result / save_image_bytes，
+    因此 response_format、图片落盘、图床 URL 等行为完全一致。
+    """
+    total = max(1, int(request.n or 1))
+    if request.progress_callback:
+        request.progress_callback("external_service")
+    try:
+        items = external_generate(
+            prompt=request.prompt,
+            model=request.model,
+            n=total,
+            size=request.size,
+            quality=request.quality,
+            images=request.images or None,
+        )
+    except ExternalImageError as exc:
+        raise ImageGenerationError(str(exc), code="external_service_error") from exc
+
+    formatted = format_image_result(
+        items,
+        request.prompt,
+        request.response_format,
+        request.base_url,
+        int(time.time()),
+    )
+    data = formatted.get("data") or []
+    # 外部服务一次性返回全部图片，按 index 切分，保持与内部链路一致的流式结构
+    chunk_size = max(1, len(data) // total) if data else 1
+    for index in range(1, total + 1):
+        start = (index - 1) * chunk_size
+        end = start + chunk_size if index < total else len(data)
+        slice_data = data[start:end]
+        if not slice_data:
+            continue
+        yield ImageOutput(
+            kind="result",
+            model=request.model,
+            index=index,
+            total=total,
+            data=slice_data,
+        )
+
+
 def stream_image_outputs_with_pool(request: ConversationRequest) -> Iterator[ImageOutput]:
     """并行生成多张图片，每张图片使用独立线程和账号，互不阻塞。"""
+    # 外部图片服务：模型名命中映射时，整条请求转发给第三方接口，不占用本机账号池
+    if is_external_model(request.model):
+        yield from stream_external_image_outputs(request)
+        return
+
     if not is_supported_image_model(request.model):
-        raise ImageGenerationError("unsupported image model,supported models: " + ", ".join(sorted(IMAGE_MODELS)))
+        raise ImageGenerationError(
+            "unsupported image model,supported models: "
+            + ", ".join(sorted(IMAGE_MODELS | set(list_external_models())))
+        )
 
     if request.n <= 1:
         # 单张图片，直接执行（无需线程池开销）

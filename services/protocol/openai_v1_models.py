@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from services.account_service import account_service
+from services.external_image_service import list_external_models
 from services.model_service import model_catalog_service
 from utils.helper import CODEX_IMAGE_MODEL
 
@@ -27,6 +28,10 @@ def list_models() -> dict[str, Any]:
            and account_service._normalize_source_type(account.get("source_type")) == "codex"
            and (normalized := account_service._normalize_account_type(account.get("type")))
     }
+
+    # 外部图片服务暴露的模型（如第三方提供的 gpt-image-2.5）
+    for external_model in list_external_models():
+        dynamic_models.add(external_model)
 
     if web_image_accounts:
         dynamic_models.add("gpt-image-2")

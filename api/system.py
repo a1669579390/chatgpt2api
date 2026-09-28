@@ -86,6 +86,11 @@ def create_router(app_version: str) -> APIRouter:
         require_identity(authorization)
         return {"third_party_apps": config.get_third_party_apps_settings()}
 
+    @router.get("/api/external-image")
+    async def get_external_image(authorization: str | None = Header(default=None)):
+        require_admin(authorization)
+        return {"external_image": config.get_public_external_image_settings()}
+
     @router.post("/api/settings")
     async def save_settings(body: SettingsUpdateRequest, authorization: str | None = Header(default=None)):
         require_admin(authorization)

@@ -151,6 +151,16 @@ export type ThirdPartyAppsSettings = {
   };
 };
 
+export type ExternalImageSettings = {
+  enabled: boolean;
+  base_url: string;
+  api_key?: string;
+  has_api_key?: boolean;
+  timeout_sec?: number | string;
+  /** 对外模型名 -> 上游模型名 */
+  external_models: Record<string, string>;
+};
+
 export type SettingsConfig = {
   proxy: string;
   base_url?: string;
@@ -183,6 +193,7 @@ export type SettingsConfig = {
   image_storage?: ImageStorageSettings;
   proxy_runtime?: ProxyRuntimeSettings;
   third_party_apps?: ThirdPartyAppsSettings;
+  external_image?: ExternalImageSettings;
   backup?: BackupSettings;
   backup_state?: BackupState;
   [key: string]: unknown;
@@ -529,6 +540,10 @@ export async function updateSettingsConfig(settings: SettingsConfig) {
 
 export async function fetchThirdPartyApps() {
   return httpRequest<{ third_party_apps: ThirdPartyAppsSettings }>("/api/third-party-apps");
+}
+
+export async function fetchExternalImage() {
+  return httpRequest<{ external_image: ExternalImageSettings }>("/api/external-image");
 }
 
 export async function testBackupConnection() {

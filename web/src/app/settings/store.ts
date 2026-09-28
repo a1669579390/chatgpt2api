@@ -23,6 +23,7 @@ import {
   type BackupState,
   type CPAPool,
   type CPARemoteFile,
+  type ExternalImageSettings,
   type ImageStorageMode,
   type ImageStorageSettings,
   type ProxyRuntimeClearanceMode,
@@ -65,6 +66,38 @@ const DEFAULT_THIRD_PARTY_APPS: ThirdPartyAppsSettings = {
     url: "https://canvas.best",
   },
 };
+
+const DEFAULT_EXTERNAL_IMAGE: ExternalImageSettings = {
+  enabled: false,
+  base_url: "",
+  api_key: "",
+  has_api_key: false,
+  timeout_sec: 180,
+  external_models: {},
+};
+
+function normalizeExternalImage(value: unknown): ExternalImageSettings {
+  const source = typeof value === "object" && value !== null ? value as Partial<ExternalImageSettings> : {};
+  const rawModels = typeof source.external_models === "object" && source.external_models !== null
+    ? source.external_models as Record<string, unknown>
+    : {};
+  const externalModels: Record<string, string> = {};
+  for (const [alias, upstream] of Object.entries(rawModels)) {
+    const aliasName = String(alias || "").trim();
+    const upstreamName = String(upstream ?? "").trim();
+    if (aliasName && upstreamName) {
+      externalModels[aliasName] = upstreamName;
+    }
+  }
+  return {
+    enabled: Boolean(source.enabled),
+    base_url: String(source.base_url || ""),
+    api_key: String(source.api_key || ""),
+    has_api_key: Boolean(source.has_api_key),
+    timeout_sec: Number(source.timeout_sec || DEFAULT_EXTERNAL_IMAGE.timeout_sec),
+    external_models: externalModels,
+  };
+}
 
 function normalizeProxyRuntime(value: unknown): ProxyRuntimeSettings {
   const source = typeof value === "object" && value !== null ? value as Partial<ProxyRuntimeSettings> : {};
@@ -206,6 +239,7 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
     },
     proxy_runtime: normalizeProxyRuntime(config.proxy_runtime),
     third_party_apps: normalizeThirdPartyApps(config.third_party_apps),
+    external_image: normalizeExternalImage(config.external_image),
     backup: {
       ...backup,
       enabled: Boolean(backup.enabled),
@@ -317,6 +351,9 @@ type SettingsStore = {
   setProxyRuntimeClearanceField: <K extends keyof ProxyRuntimeSettings["clearance"]>(key: K, value: ProxyRuntimeSettings["clearance"][K]) => void;
   setProxyRuntimeStatusCodesText: (value: string) => void;
   setInfiniteCanvasField: <K extends keyof ThirdPartyAppsSettings["infinite_canvas"]>(key: K, value: ThirdPartyAppsSettings["infinite_canvas"][K]) => void;
+  setExternalImageField: <K extends keyof ExternalImageSettings>(key: K, value: ExternalImageSettings[K]) => void;
+  setExternalImageModel: (alias: string, upstream: string) => void;
+  removeExternalImageModel: (alias: string) => void;
   testImageStorage: () => Promise<void>;
   syncImagesToWebDAV: () => Promise<void>;
   setBackupField: (key: keyof BackupSettings, value: string | boolean) => void;
@@ -481,6 +518,13 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
             enabled: Boolean(config.third_party_apps?.infinite_canvas?.enabled),
             url: String(config.third_party_apps?.infinite_canvas?.url || DEFAULT_THIRD_PARTY_APPS.infinite_canvas.url).trim(),
           },
+        },
+        external_image: {
+          enabled: Boolean(config.external_image?.enabled),
+          base_url: String(config.external_image?.base_url || "").trim().replace(/\/+$/, ""),
+          api_key: String(config.external_image?.api_key || "").trim(),
+          timeout_sec: Math.max(10, Number(config.external_image?.timeout_sec) || 180),
+          external_models: normalizeExternalImage(config.external_image).external_models,
         },
         backup: {
           ...(config.backup as BackupSettings),
@@ -710,6 +754,73 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
             ...runtime,
             reset_session_status_codes: codes.length > 0 ? codes : [403],
           }),
+        },
+      };
+    });
+  },
+
+  setExternalImageField: (key, value) => {
+    set((state) => {
+      if (!state.config) {
+        return {};
+      }
+      const current = normalizeExternalImage(state.config.external_image);
+      return {
+        config: {
+          ...state.config,
+          external_image: {
+            ...current,
+            [key]: value,
+          },
+        },
+      };
+    });
+  },
+
+  setExternalImageModel: (alias, upstream) => {
+    set((state) => {
+      if (!state.config) {
+        return {};
+      }
+      const current = normalizeExternalImage(state.config.external_image);
+      const nextModels = { ...current.external_models };
+      const aliasName = String(alias || "").trim();
+      const upstreamName = String(upstream || "").trim();
+      if (!aliasName) {
+        return {};
+      }
+      if (!upstreamName) {
+        delete nextModels[aliasName];
+      } else {
+        nextModels[aliasName] = upstreamName;
+      }
+      return {
+        config: {
+          ...state.config,
+          external_image: {
+            ...current,
+            external_models: nextModels,
+          },
+        },
+      };
+    });
+  },
+
+  removeExternalImageModel: (alias) => {
+    set((state) => {
+      if (!state.config) {
+        return {};
+      }
+      const current = normalizeExternalImage(state.config.external_image);
+      const nextModels = { ...current.external_models };
+      delete nextModels[String(alias || "").trim()];
+      return {
+        config: {
+          ...state.config,
+          external_image: {
+            ...current,
+            external_models: nextModels,
+          },
         },
       };
     });
